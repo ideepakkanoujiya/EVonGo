@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Table,
   TableBody,
@@ -26,25 +26,34 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { PlusCircle, BookOpen } from 'lucide-react';
 import type { ServiceRecord } from '@/lib/types';
-
-const initialRecords: ServiceRecord[] = [];
+import { useAuth } from '@/hooks/use-auth';
+import { addServiceRecord, getServiceRecords } from '@/lib/user-data';
 
 export default function VehicleLogPage() {
-  const [records, setRecords] = useState(initialRecords);
+  const { user } = useAuth();
+  const [records, setRecords] = useState<ServiceRecord[]>([]);
   const [isDialogOpen, setDialogOpen] = useState(false);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    setRecords(getServiceRecords(user.uid));
+  }, [user?.uid]);
 
   const addRecord = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!user?.uid) return;
     const formData = new FormData(event.currentTarget);
     const newRecord: ServiceRecord = {
-      id: (records.length + 1).toString(),
+      id: crypto.randomUUID(),
       date: formData.get('date') as string,
       service: formData.get('service') as string,
       cost: Number(formData.get('cost')),
       notes: formData.get('notes') as string,
     };
-    setRecords([newRecord, ...records].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+    const next = addServiceRecord(user.uid, newRecord);
+    setRecords(next);
     setDialogOpen(false);
+    event.currentTarget.reset();
   };
   
   return (

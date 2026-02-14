@@ -9,10 +9,11 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
-import { useState, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Map, BatteryCharging, Clock, AlertCircle, Sparkles, Navigation, Search, LocateFixed } from 'lucide-react';
-import Image from 'next/image';
+import { useAuth } from '@/hooks/use-auth';
+import { addTripRecord } from '@/lib/user-data';
 
 function SubmitButton() {
   const { pending } = useFormStatus();
@@ -34,24 +35,57 @@ function SubmitButton() {
 }
 
 export default function PlannerPage() {
+  const { user } = useAuth();
   const initialState: RoutePlanState = { message: null, errors: {} };
   const [state, dispatch] = useActionState(planRoute, initialState);
   const [battery, setBattery] = useState(80);
+  const [startLocation, setStartLocation] = useState('');
+  const [endLocation, setEndLocation] = useState('');
   const startLocationRef = useRef<HTMLInputElement>(null);
+  const lastSavedKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!state.result || !user?.uid) return;
+
+    const tripKey = [
+      startLocation,
+      endLocation,
+      state.result.totalTripDurationMinutes,
+      state.result.totalChargingTimeMinutes,
+      state.result.chargingStops.length,
+    ].join('|');
+
+    if (tripKey === lastSavedKeyRef.current) return;
+
+    addTripRecord(user.uid, {
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      startLocation,
+      endLocation,
+      totalTripDurationMinutes: state.result.totalTripDurationMinutes,
+      totalChargingTimeMinutes: state.result.totalChargingTimeMinutes,
+      chargingStopsCount: state.result.chargingStops.length,
+    });
+    lastSavedKeyRef.current = tripKey;
+  }, [endLocation, startLocation, state.result, user?.uid]);
 
   const handleCurrentLocation = async () => {
     if (startLocationRef.current) {
         startLocationRef.current.value = 'Fetching location...';
+        setStartLocation('Fetching location...');
         navigator.geolocation.getCurrentPosition(
             (position) => {
                 if (startLocationRef.current) {
-                    startLocationRef.current.value = `${position.coords.latitude}, ${position.coords.longitude}`;
+                    const location = `${position.coords.latitude}, ${position.coords.longitude}`;
+                    startLocationRef.current.value = location;
+                    setStartLocation(location);
                 }
             },
             (error) => {
                 console.error("Error getting location", error);
                 if (startLocationRef.current) {
                     startLocationRef.current.value = '';
+                    setStartLocation('');
                 }
                 alert("Could not get your location. Please ensure location services are enabled.");
             }
@@ -74,7 +108,15 @@ export default function PlannerPage() {
                 <div className="flex gap-2">
                   <div className="relative flex-grow">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input id="startLocation" name="startLocation" ref={startLocationRef} placeholder="e.g., Mumbai" required className="pl-10" />
+                    <Input
+                      id="startLocation"
+                      name="startLocation"
+                      ref={startLocationRef}
+                      placeholder="e.g., Mumbai"
+                      required
+                      className="pl-10"
+                      onChange={(e) => setStartLocation(e.target.value)}
+                    />
                   </div>
                   <Button type="button" variant="outline" size="icon" onClick={handleCurrentLocation} aria-label="Use current location">
                     <LocateFixed className="h-4 w-4"/>
@@ -86,7 +128,14 @@ export default function PlannerPage() {
                 <Label htmlFor="endLocation">End Location</Label>
                  <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input id="endLocation" name="endLocation" placeholder="e.g., Bangalore" required className="pl-10" />
+                  <Input
+                    id="endLocation"
+                    name="endLocation"
+                    placeholder="e.g., Bangalore"
+                    required
+                    className="pl-10"
+                    onChange={(e) => setEndLocation(e.target.value)}
+                  />
                 </div>
                 {state.errors?.endLocation && <p className="text-sm text-destructive">{state.errors.endLocation}</p>}
               </div>
@@ -149,10 +198,17 @@ export default function PlannerPage() {
                 </CardHeader>
                 <CardContent>
                     <div className="relative aspect-video w-full">
-                        <Image src="https://i.ibb.co/V3V3V3V/map-placeholder.png" alt="Map with route" layout="fill" objectFit="cover" className="rounded-md" data-ai-hint="map route" />
-                         <div className="absolute inset-0 bg-black/20 flex items-center justify-center rounded-md">
-                            <p className="text-white text-lg font-semibold bg-black/50 px-4 py-2 rounded-md">Map view coming soon!</p>
-                        </div>
+                      <iframe
+                        title="Route map"
+                        className="h-full w-full rounded-md border"
+                        loading="lazy"
+                        referrerPolicy="no-referrer-when-downgrade"
+                        src={`https://www.google.com/maps?q=${encodeURIComponent(
+                          `${startLocation || 'Start'} to ${endLocation || 'Destination'} via ${state.result.chargingStops
+                            .map((stop) => stop.location)
+                            .join(', ')}`
+                        )}&output=embed`}
+                      />
                     </div>
                 </CardContent>
             </Card>

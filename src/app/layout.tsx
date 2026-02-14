@@ -1,9 +1,16 @@
 
 import type { Metadata } from 'next';
+import { PT_Sans } from 'next/font/google';
 import { cn } from '@/lib/utils';
 import { Toaster } from "@/components/ui/toaster"
 import { AuthProvider, AuthGate } from '@/hooks/use-auth';
 import './globals.css';
+
+const ptSans = PT_Sans({
+  subsets: ['latin'],
+  weight: ['400', '700'],
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   title: 'EVgoMap - Your Smart EV Companion',
@@ -22,12 +29,9 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link href="https://fonts.googleapis.com/css2?family=PT+Sans:wght@400;700&display=swap" rel="stylesheet" />
         <meta name="theme-color" content="#2563EB" />
       </head>
-      <body className={cn('font-body antialiased', 'min-h-screen bg-background')}>
+      <body suppressHydrationWarning className={cn(ptSans.className, 'font-body antialiased', 'min-h-screen bg-background')}>
         <AuthProvider>
             <AuthGate>
                 {children}

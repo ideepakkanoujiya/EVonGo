@@ -46,6 +46,7 @@ export default function AssistantPage() {
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const [diagnosisAudio, setDiagnosisAudio] = useState<string | null>(null);
     const [isSynthesizing, setIsSynthesizing] = useState(false);
+    const [audioError, setAudioError] = useState<string | null>(null);
     const audioRef = useRef<HTMLAudioElement>(null);
 
 
@@ -111,10 +112,15 @@ export default function AssistantPage() {
     useEffect(() => {
         if (state.result?.diagnosis) {
             setDiagnosisAudio(null);
+            setAudioError(null);
             setIsSynthesizing(true);
             textToSpeechAction(state.result.diagnosis)
                 .then(audioDataUri => {
-                    setDiagnosisAudio(audioDataUri);
+                    if (audioDataUri) {
+                        setDiagnosisAudio(audioDataUri);
+                    } else {
+                        setAudioError('Audio playback is unavailable right now. You can still use the text diagnosis.');
+                    }
                 })
                 .catch(err => console.error("Error synthesizing audio:", err))
                 .finally(() => setIsSynthesizing(false));
@@ -237,6 +243,9 @@ export default function AssistantPage() {
                                     </Button>
                                 </div>
                                 <p className="bg-secondary p-4 rounded-md">{state.result.diagnosis}</p>
+                                {audioError && (
+                                  <p className="mt-2 text-sm text-muted-foreground">{audioError}</p>
+                                )}
                                 {diagnosisAudio && <audio src={diagnosisAudio} ref={audioRef} />}
                             </div>
                              <div>

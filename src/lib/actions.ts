@@ -243,12 +243,12 @@ export async function transcribeAudioAction(audioDataUri: string): Promise<strin
 }
 
 
-export async function textToSpeechAction(text: string): Promise<string> {
+export async function textToSpeechAction(text: string): Promise<string | null> {
     try {
         const { audioDataUri } = await textToSpeech({ text });
         return audioDataUri;
     } catch (error) {
         console.error('Error converting text to speech:', error);
-        throw new Error("Failed to generate audio.");
+        return null;
     }
 }
