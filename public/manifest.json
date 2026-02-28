@@ -1,6 +1,6 @@
 {
-  "name": "EVgoMap - Your Smart EV Companion",
-  "short_name": "EVgoMap",
+  "name": "EVonGo - Your Smart EV Companion",
+  "short_name": "EVonGo",
   "description": "A comprehensive web application for electric vehicle owners, featuring a smart route planner, charging station locator, and community hub.",
   "icons": [
     {

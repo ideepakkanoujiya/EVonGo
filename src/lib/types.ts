@@ -1,7 +1,7 @@
 
 import type { Timestamp } from 'firebase/firestore';
 
-export type ChargingStation = {
+export type EVChargingStation = {
   id: string;
   name: string;
   address: string;

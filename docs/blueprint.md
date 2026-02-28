@@ -1,4 +1,4 @@
-# **App Name**: EVgoMap
+# **App Name**: EVonGo
 
 ## Core Features:
 

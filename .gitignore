@@ -39,7 +39,16 @@ next-env.d.ts
 
 .genkit/*
 .env.local
-.env.local.example
+
+# python / ml-service
+__pycache__/
+*.pyc
+backend/ml-service/__pycache__/
+backend/ml-service/venv/
+backend/ml-service/models/
+backend/ml-service/*.log
+ev_predictor.log
+
 
 # firebase
 firebase-debug.log

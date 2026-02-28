@@ -14,7 +14,7 @@ export default function TermsOfServicePage() {
             text with your own terms, outlining the rules and guidelines for using your app.
           </p>
           <p>
-            By using EVgoMap {`("the app")`}, you agree to these terms. The services provided,
+            By using EVonGo {`("the app")`}, you agree to these terms. The services provided,
             including route planning, station location, and AI-powered diagnostics, are for
             informational purposes only. While we strive for accuracy, we cannot guarantee the
             correctness or availability of the data provided.

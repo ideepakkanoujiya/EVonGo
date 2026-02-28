@@ -4,22 +4,22 @@
 /**
  * @fileOverview Finds charging stations based on a location query.
  *
- * - findChargingStations - A function that finds charging stations.
- * - FindChargingStationsInput - The input type for the findChargingStations function.
- * - FindChargingStationsOutput - The return type for the findChargingStations function.
+ * - findEVChargingStations - A function that finds charging stations.
+ * - FindEVChargingStationsInput - The input type for the findEVChargingStations function.
+ * - FindEVChargingStationsOutput - The return type for the findEVChargingStations function.
  */
 
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
 
-const FindChargingStationsInputSchema = z.object({
+const FindEVChargingStationsInputSchema = z.object({
     query: z.string().describe('The location to search for charging stations, e.g., "Mumbai" or "near me".'),
     latitude: z.number().optional().describe("The user's current latitude."),
     longitude: z.number().optional().describe("The user's current longitude."),
 });
-export type FindChargingStationsInput = z.infer<typeof FindChargingStationsInputSchema>;
+export type FindEVChargingStationsInput = z.infer<typeof FindEVChargingStationsInputSchema>;
 
-const FindChargingStationsOutputSchema = z.object({
+const FindEVChargingStationsOutputSchema = z.object({
     stations: z.array(z.object({
         id: z.string().describe("A unique identifier for the station."),
         name: z.string().describe("The name of the charging station."),
@@ -35,16 +35,16 @@ const FindChargingStationsOutputSchema = z.object({
         isAvailable: z.boolean().describe("Whether any connectors are currently available at the station.")
     }))
 });
-export type FindChargingStationsOutput = z.infer<typeof FindChargingStationsOutputSchema>;
+export type FindEVChargingStationsOutput = z.infer<typeof FindEVChargingStationsOutputSchema>;
 
-export async function findChargingStations(input: FindChargingStationsInput): Promise<FindChargingStationsOutput> {
-  return findChargingStationsFlow(input);
+export async function findEVChargingStations(input: FindEVChargingStationsInput): Promise<FindEVChargingStationsOutput> {
+  return findEVChargingStationsFlow(input);
 }
 
 const prompt = ai.definePrompt({
-  name: 'findChargingStationsPrompt',
-  input: {schema: FindChargingStationsInputSchema},
-  output: {schema: FindChargingStationsOutputSchema},
+  name: 'findEVChargingStationsPrompt',
+  input: {schema: FindEVChargingStationsInputSchema},
+  output: {schema: FindEVChargingStationsOutputSchema},
   prompt: `You are an EV charging station locator for India. Find charging stations in India based on the user's query.
 
 {{#if latitude}}
@@ -57,11 +57,11 @@ Return a list of charging stations with their details. Include a variety of conn
 `,
 });
 
-const findChargingStationsFlow = ai.defineFlow(
+const findEVChargingStationsFlow = ai.defineFlow(
   {
-    name: 'findChargingStationsFlow',
-    inputSchema: FindChargingStationsInputSchema,
-    outputSchema: FindChargingStationsOutputSchema,
+    name: 'findEVChargingStationsFlow',
+    inputSchema: FindEVChargingStationsInputSchema,
+    outputSchema: FindEVChargingStationsOutputSchema,
   },
   async input => {
     const {output} = await prompt(input);

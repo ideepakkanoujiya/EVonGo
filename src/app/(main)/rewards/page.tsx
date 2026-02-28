@@ -91,7 +91,7 @@ export default function RewardsPage() {
             <CardHeader>
               <Zap className="mb-2 h-8 w-8 text-primary" />
               <CardTitle>Exclusive Merchandise</CardTitle>
-              <CardDescription>Get exclusive EVgoMap t-shirts, caps, and more. Starts at 2,500 points.</CardDescription>
+              <CardDescription>Get exclusive EVonGo t-shirts, caps, and more. Starts at 2,500 points.</CardDescription>
             </CardHeader>
             <CardContent>
               <Button className="w-full" disabled={summary.points < 2500}>Browse Store</Button>

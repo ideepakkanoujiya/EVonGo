@@ -15,7 +15,7 @@ export default function PrivacyPolicyPage() {
             {`It's`} important to be transparent with your users about their privacy.
           </p>
           <p>
-            Our application, EVgoMap, uses Firebase Authentication to handle user sign-up and
+            Our application, EVonGo, uses Firebase Authentication to handle user sign-up and
             login. When you sign in with Google, we receive your basic profile information, such as
             your name, email address, and profile picture, as permitted by you through the Google
             consent screen. We use this information solely to create and manage your account and

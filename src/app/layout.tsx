@@ -13,7 +13,7 @@ const ptSans = PT_Sans({
 });
 
 export const metadata: Metadata = {
-  title: 'EVgoMap - Your Smart EV Companion',
+  title: 'EVonGo - Your Smart EV Companion',
   description: 'A comprehensive web application for electric vehicle owners, featuring a smart route planner, charging station locator, and community hub.',
   manifest: '/manifest.json',
   icons: {

@@ -2,7 +2,7 @@
 'use server';
 
 import { suggestChargingStops, type SuggestChargingStopsOutput } from '@/ai/flows/suggest-charging-stops';
-import { findChargingStations, type FindChargingStationsOutput } from '@/ai/flows/find-charging-stations';
+import { findEVChargingStations, type FindEVChargingStationsOutput } from '@/ai/flows/find-charging-stations';
 import { findServiceCenters, type FindServiceCentersOutput } from '@/ai/flows/find-service-centers';
 import { addCommunityPost } from '@/ai/flows/addCommunityPost';
 import { diagnoseProblem, type DiagnoseProblemOutput } from '@/ai/flows/diagnose-problem';
@@ -71,7 +71,7 @@ const LocationSearchSchema = z.object({
 export type StationState = {
     message?: string | null;
     errors?: { query?: string[] };
-    result?: FindChargingStationsOutput;
+    result?: FindEVChargingStationsOutput;
 };
 
 export async function searchStations(prevState: StationState, formData: FormData): Promise<StationState> {
@@ -89,7 +89,7 @@ export async function searchStations(prevState: StationState, formData: FormData
     }
 
     try {
-        const result = await findChargingStations(validatedFields.data);
+        const result = await findEVChargingStations(validatedFields.data);
         if (!result) {
             return { result: { stations: [] } };
         }

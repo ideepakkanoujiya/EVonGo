@@ -129,9 +129,19 @@ NEXT_PUBLIC_FIREBASE_PROJECT_ID=your_project_id
 NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your_storage_bucket
 NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
 NEXT_PUBLIC_FIREBASE_APP_ID=your_app_id
+GOOGLE_GENAI_API_KEY=your_genkit_key
+ROUTING_PROVIDER=tomtom
+OPENROUTESERVICE_API_KEY=your_openrouteservice_api_key
+TOMTOM_API_KEY=your_tomtom_api_key
+OPENCHARGEMAP_API_KEY=your_openchargemap_api_key
+OPENCHARGEMAP_COUNTRY_CODE=IN
+ML_SERVICE_URL=http://localhost:5000
 NEXT_PUBLIC_ML_SERVICE_URL=http://localhost:5000
-NEXT_PUBLIC_GOOGLE_GENKIT_API_KEY=your_genkit_key
 ```
+
+Routing notes:
+- `ROUTING_PROVIDER=tomtom` is traffic-aware and preferred by default.
+- If the selected provider fails, planner routing automatically falls back to the other provider.
 
 4. Run the development server
 ```bash
