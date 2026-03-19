@@ -74,11 +74,20 @@ type LeafletMarker = {
   bindPopup: (content: string) => LeafletMarker;
 };
 
+type LeafletIcon = object;
+
 type LeafletGlobal = {
   map: (container: HTMLElement) => LeafletMap;
   tileLayer: (urlTemplate: string, options: Record<string, unknown>) => { addTo: (map: LeafletMap) => void };
   layerGroup: () => LeafletLayerGroup;
-  marker: (latlng: LatLngTuple) => LeafletMarker;
+  marker: (latlng: LatLngTuple, options?: { icon?: LeafletIcon }) => LeafletMarker;
+  divIcon: (options: {
+    html: string;
+    className?: string;
+    iconSize?: [number, number];
+    iconAnchor?: [number, number];
+    popupAnchor?: [number, number];
+  }) => LeafletIcon;
   polyline: (latlngs: LatLngTuple[], options?: Record<string, unknown>) => { addTo: (layer: LeafletLayerGroup) => void };
   latLngBounds: (latlngs?: LatLngTuple[]) => LeafletBounds;
 };
@@ -410,10 +419,25 @@ export default function PlannerPage() {
         selectedRoute.destination.lng,
       ];
 
-      L.marker(origin).bindPopup('Start').addTo(layer);
-      L.marker(destination).bindPopup('Destination').addTo(layer);
+      const createMarkerIcon = (label: string, backgroundColor: string) =>
+        L.divIcon({
+          className: '',
+          html: `<div style="display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:9999px;background:${backgroundColor};color:#fff;font-weight:700;font-size:13px;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.35);">${label}</div>`,
+          iconSize: [30, 30],
+          iconAnchor: [15, 15],
+          popupAnchor: [0, -12],
+        });
+
+      const startIcon = createMarkerIcon('S', '#16a34a');
+      const destinationIcon = createMarkerIcon('D', '#dc2626');
+
+      L.marker(origin, { icon: startIcon }).bindPopup('Start').addTo(layer);
+      L.marker(destination, { icon: destinationIcon }).bindPopup('Destination').addTo(layer);
       chargingStops.forEach((stop) => {
-        L.marker([stop.station.location.lat, stop.station.location.lng])
+        const chargingIcon = createMarkerIcon(`C${stop.stopIndex}`, '#f59e0b');
+        L.marker([stop.station.location.lat, stop.station.location.lng], {
+          icon: chargingIcon,
+        })
           .bindPopup(`Stop ${stop.stopIndex}: ${stop.station.name}`)
           .addTo(layer);
       });
