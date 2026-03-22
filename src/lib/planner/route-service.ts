@@ -21,6 +21,10 @@ const MAX_TOMTOM_ALTERNATIVES = 2;
 const COORDINATE_REGEX = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/;
 const EARTH_RADIUS_KM = 6371;
 const DEFAULT_CHARGING_POWER_KW = 50;
+const STATION_PROVIDER_TIMEOUT_MS = 8000;
+const STATION_SEARCH_BATCH_SIZE = 4;
+const MAX_PARTIAL_CHARGING_SUGGESTIONS = 5;
+const MAX_HORIZON_OFFSETS = [-0.2, 0, 0.2];
 
 // --- Schemas ---
 const PlannerRequestSchema = z.object({
@@ -131,6 +135,25 @@ function haversineKm(a: LatLng, b: LatLng): number {
     Math.sin(dLat / 2) ** 2 +
     Math.sin(dLng / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2);
   return 2 * EARTH_RADIUS_KM * Math.asin(Math.sqrt(angle));
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit = {},
+  timeoutMs: number = STATION_PROVIDER_TIMEOUT_MS
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 function buildRouteDistanceProfile(routePoints: LatLng[]): number[] {
@@ -664,11 +687,15 @@ async function searchChargingStationsNear(
   radiusKm: number = 10
 ): Promise<EVChargingStation[]> {
   try {
-    console.log('🔍 Searching for charging stations near', location.lat, location.lng);
+    console.log(
+      `🔍 Searching for charging stations near ${location.lat}, ${location.lng} (radius ${radiusKm} km)`
+    );
     const ocmApiKey = process.env.OPENCHARGEMAP_API_KEY;
     const tomtomApiKey = process.env.TOMTOM_API_KEY;
     const googlePlacesKey =
       process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
+
+    const providerSummaries: string[] = [];
 
     const normalizeStation = (station: EVChargingStation): EVChargingStation => ({
       ...station,
@@ -713,15 +740,20 @@ async function searchChargingStationsNear(
     };
 
     const fetchFromOpenChargeMap = async (): Promise<EVChargingStation[]> => {
-      if (!ocmApiKey) return [];
+      if (!ocmApiKey) {
+        providerSummaries.push('ocm:skipped(no key)');
+        return [];
+      }
+      const startedAt = Date.now();
       const url = `https://api.openchargemap.io/v3/poi/?output=json&latitude=${location.lat}&longitude=${location.lng}&distance=${radiusKm}&distanceunit=KM&maxresults=100&key=${ocmApiKey}`;
-      const response = await fetch(url, {
+      const response = await fetchWithTimeout(url, {
         method: 'GET',
         cache: 'no-store',
         headers: { Accept: 'application/json' },
       });
       if (!response.ok) {
         const errorText = await response.text();
+        providerSummaries.push(`ocm:error(${response.status})`);
         console.error('❌ OpenChargeMap station fetch failed:', response.status, errorText);
         return [];
       }
@@ -740,7 +772,7 @@ async function searchChargingStationsNear(
       };
 
       const data = (await response.json()) as OpenChargeMapResult[];
-      return data
+      const stations = data
         .filter(
           (
             station
@@ -771,10 +803,16 @@ async function searchChargingStationsNear(
             power_kW,
           };
         });
+      providerSummaries.push(`ocm:${stations.length} in ${Date.now() - startedAt}ms`);
+      return stations;
     };
 
     const fetchFromTomTom = async (): Promise<EVChargingStation[]> => {
-      if (!tomtomApiKey) return [];
+      if (!tomtomApiKey) {
+        providerSummaries.push('tomtom:skipped(no key)');
+        return [];
+      }
+      const startedAt = Date.now();
       const params = new URLSearchParams({
         key: tomtomApiKey,
         lat: String(location.lat),
@@ -782,12 +820,13 @@ async function searchChargingStationsNear(
         radius: String(Math.round(radiusKm * 1000)),
         limit: '100',
       });
-      const response = await fetch(
+      const response = await fetchWithTimeout(
         `https://api.tomtom.com/search/2/poiSearch/${encodeURIComponent('ev charging station')}.json?${params.toString()}`,
         { method: 'GET', cache: 'no-store' }
       );
       if (!response.ok) {
         const errorText = await response.text();
+        providerSummaries.push(`tomtom:error(${response.status})`);
         console.error('❌ TomTom station fetch failed:', response.status, errorText);
         return [];
       }
@@ -802,7 +841,7 @@ async function searchChargingStationsNear(
       };
 
       const data = (await response.json()) as TomTomPoiResponse;
-      return (data.results || [])
+      const stations = (data.results || [])
         .filter(
           (
             result
@@ -825,10 +864,16 @@ async function searchChargingStationsNear(
                 ),
           connectorTypes: [],
         }));
+      providerSummaries.push(`tomtom:${stations.length} in ${Date.now() - startedAt}ms`);
+      return stations;
     };
 
     const fetchFromGooglePlaces = async (): Promise<EVChargingStation[]> => {
-      if (!googlePlacesKey) return [];
+      if (!googlePlacesKey) {
+        providerSummaries.push('google:skipped(no key)');
+        return [];
+      }
+      const startedAt = Date.now();
       const radiusMeters = Math.max(1000, Math.min(50000, Math.round(radiusKm * 1000)));
       const params = new URLSearchParams({
         location: `${location.lat},${location.lng}`,
@@ -836,12 +881,13 @@ async function searchChargingStationsNear(
         keyword: 'ev charging station',
         key: googlePlacesKey,
       });
-      const response = await fetch(
+      const response = await fetchWithTimeout(
         `https://maps.googleapis.com/maps/api/place/nearbysearch/json?${params.toString()}`,
         { method: 'GET', cache: 'no-store' }
       );
       if (!response.ok) {
         const errorText = await response.text();
+        providerSummaries.push(`google:error(${response.status})`);
         console.error('❌ Google Places station fetch failed:', response.status, errorText);
         return [];
       }
@@ -856,9 +902,12 @@ async function searchChargingStationsNear(
       };
 
       const data = (await response.json()) as GoogleNearbyResponse;
-      if (!Array.isArray(data.results)) return [];
+      if (!Array.isArray(data.results)) {
+        providerSummaries.push(`google:0 in ${Date.now() - startedAt}ms`);
+        return [];
+      }
 
-      return data.results
+      const stations = data.results
         .filter(
           (
             result
@@ -885,6 +934,8 @@ async function searchChargingStationsNear(
           ),
           connectorTypes: [],
         }));
+      providerSummaries.push(`google:${stations.length} in ${Date.now() - startedAt}ms`);
+      return stations;
     };
 
     const providerResults = await Promise.allSettled([
@@ -892,6 +943,14 @@ async function searchChargingStationsNear(
       fetchFromTomTom(),
       fetchFromGooglePlaces(),
     ]);
+
+    providerResults.forEach((result, index) => {
+      if (result.status !== 'rejected') return;
+      const providerName = ['ocm', 'tomtom', 'google'][index] || `provider-${index + 1}`;
+      const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
+      providerSummaries.push(`${providerName}:failed(${reason})`);
+      console.error(`❌ ${providerName} station lookup failed:`, result.reason);
+    });
 
     const successfulResults = providerResults
       .filter(
@@ -901,7 +960,9 @@ async function searchChargingStationsNear(
       .map((result) => result.value);
 
     const mergedStations = mergeStations(successfulResults);
-    console.log('✅ Aggregated', mergedStations.length, 'stations from available providers');
+    console.log(
+      `✅ Aggregated ${mergedStations.length} stations from available providers [${providerSummaries.join(', ')}]`
+    );
     return mergedStations;
   } catch (error) {
     console.error('❌ Error searching charging stations:', error);
@@ -953,7 +1014,10 @@ export async function analyzeEVRoute(
   const recommendation: EVChargingRecommendation = {
     needed: false,
     chargingStops: [],
-    arrivalBatteryPercent: currentBatteryPercent,
+    suggestedChargingStops: [],
+    arrivalBatteryPercent: canReachDestination
+      ? currentBatteryRange.estimatedBatteryLeftPercent
+      : currentBatteryPercent,
     targetBatteryPercent: currentBatteryPercent,
     chargingDurationMinutes: 0,
     totalChargingDurationMinutes: 0,
@@ -990,8 +1054,38 @@ export async function analyzeEVRoute(
       Number.isFinite(profileDistanceKm) && profileDistanceKm > 1 ? profileDistanceKm : distanceKm;
     const TARGET_CHARGE_PERCENT = 100;
     const BATTERY_BUFFER = 5;
+    const currentLegReachKm = Math.max(
+      40,
+      ((Math.max(0, currentBatteryPercent - BATTERY_BUFFER)) / 100) * maxRangeKm
+    );
+    const fullChargeLegReachKm = Math.max(
+      60,
+      ((Math.max(0, TARGET_CHARGE_PERCENT - BATTERY_BUFFER)) / 100) * maxRangeKm
+    );
+    const primarySpacingKm = clampNumber(fullChargeLegReachKm * 0.45, 55, 140);
+    const fallbackSpacingKm = clampNumber(fullChargeLegReachKm * 0.3, 35, 95);
+    const primarySampleCount = Math.max(
+      12,
+      Math.min(30, Math.ceil(effectiveRouteDistanceKm / primarySpacingKm))
+    );
+    const fallbackSampleCount = Math.max(
+      primarySampleCount + 6,
+      Math.min(60, Math.ceil(effectiveRouteDistanceKm / fallbackSpacingKm))
+    );
+    const primaryRadii = Array.from(
+      new Set([
+        Math.round(clampNumber(currentLegReachKm * 0.28, 70, 140)),
+        Math.round(clampNumber(fullChargeLegReachKm * 0.55, 120, 240)),
+      ])
+    );
+    const fallbackRadii = Array.from(
+      new Set([
+        Math.round(clampNumber(fullChargeLegReachKm * 0.45, 100, 200)),
+        Math.round(clampNumber(fullChargeLegReachKm * 0.9, 180, 360)),
+      ])
+    );
 
-    const stationSearchCache = new Map<string, EVChargingStation[]>();
+    const stationSearchCache = new Map<string, Promise<EVChargingStation[]>>();
     const stationById = new Map<string, EVChargingStation>();
     const stationMetaById = new Map<string, { stationDistanceKm: number; detourKm: number }>();
 
@@ -1000,11 +1094,14 @@ export async function analyzeEVRoute(
       radiusKm: number
     ): Promise<EVChargingStation[]> => {
       const key = `${location.lat.toFixed(3)},${location.lng.toFixed(3)}:${radiusKm}`;
-      const cached = stationSearchCache.get(key);
-      if (cached) return cached;
-      const fetched = await searchChargingStationsNear(location, radiusKm);
-      stationSearchCache.set(key, fetched);
-      return fetched;
+      const cachedPromise = stationSearchCache.get(key);
+      if (cachedPromise) return cachedPromise;
+      const fetchPromise = searchChargingStationsNear(location, radiusKm).catch((error) => {
+        console.error(`❌ Station lookup failed for cache key ${key}:`, error);
+        return [];
+      });
+      stationSearchCache.set(key, fetchPromise);
+      return fetchPromise;
     };
 
     const addStationsToPool = (stations: EVChargingStation[]) => {
@@ -1020,21 +1117,84 @@ export async function analyzeEVRoute(
 
     const collectStationsAlongRoute = async (sampleCount: number, radii: number[]) => {
       const samples = Math.max(2, Math.min(sampleCount, Math.max(2, routePoints.length - 1)));
+      const tasks: Array<() => Promise<EVChargingStation[]>> = [];
       for (let i = 0; i <= samples; i += 1) {
         const sampledDistanceKm = (effectiveRouteDistanceKm * i) / samples;
         const sampleIndex = findRoutePointIndexAtDistance(routeDistanceProfileKm, sampledDistanceKm);
         const samplePoint = routePoints[sampleIndex] || primaryRoute.origin;
         for (const radiusKm of radii) {
-          const fetched = await searchChargingStationsCached(samplePoint, radiusKm);
-          addStationsToPool(fetched);
+          tasks.push(() => searchChargingStationsCached(samplePoint, radiusKm));
+        }
+      }
+
+      console.log(
+        `🔎 Collecting charging stations across ${tasks.length} route lookups (${samples + 1} samples, radii: ${radii.join(', ')})`
+      );
+
+      for (let index = 0; index < tasks.length; index += STATION_SEARCH_BATCH_SIZE) {
+        const batch = tasks.slice(index, index + STATION_SEARCH_BATCH_SIZE);
+        const results = await Promise.all(batch.map((task) => task()));
+        results.forEach(addStationsToPool);
+        console.log(
+          `⏱️ Station lookup progress: ${Math.min(index + batch.length, tasks.length)}/${tasks.length} lookups, pool=${stationById.size}`
+        );
+        if (stationById.size >= 180) {
+          console.log('✅ Station pool is sufficiently populated; stopping additional lookups early');
+          break;
         }
       }
     };
 
-    await collectStationsAlongRoute(18, [80, 220]);
-    if (stationById.size < 120) {
-      await collectStationsAlongRoute(36, [120, 320]);
-    }
+    const collectStationsNearExpectedStops = async (radii: number[]) => {
+      const targetDistances: number[] = [];
+      const offsetSpreadKm = clampNumber(fullChargeLegReachKm * 0.18, 20, 75);
+
+      let nextTargetKm = currentLegReachKm;
+      while (nextTargetKm < effectiveRouteDistanceKm) {
+        targetDistances.push(nextTargetKm);
+        nextTargetKm += fullChargeLegReachKm;
+      }
+
+      if (targetDistances.length === 0) {
+        return;
+      }
+
+      const tasks: Array<() => Promise<EVChargingStation[]>> = [];
+      for (const targetDistanceKm of targetDistances) {
+        for (const offsetMultiplier of MAX_HORIZON_OFFSETS) {
+          const lookupDistanceKm = clampNumber(
+            targetDistanceKm + offsetMultiplier * offsetSpreadKm,
+            0,
+            effectiveRouteDistanceKm
+          );
+          const sampleIndex = findRoutePointIndexAtDistance(
+            routeDistanceProfileKm,
+            lookupDistanceKm
+          );
+          const samplePoint = routePoints[sampleIndex] || primaryRoute.origin;
+          for (const radiusKm of radii) {
+            tasks.push(() => searchChargingStationsCached(samplePoint, radiusKm));
+          }
+        }
+      }
+
+      console.log(
+        `🧭 Collecting stations near ${targetDistances.length} expected charging horizons (${tasks.length} targeted lookups)`
+      );
+
+      for (let index = 0; index < tasks.length; index += STATION_SEARCH_BATCH_SIZE) {
+        const batch = tasks.slice(index, index + STATION_SEARCH_BATCH_SIZE);
+        const results = await Promise.all(batch.map((task) => task()));
+        results.forEach(addStationsToPool);
+        if (stationById.size >= 220) {
+          console.log('✅ Targeted horizon search gathered enough stations; stopping early');
+          break;
+        }
+      }
+    };
+
+    await collectStationsAlongRoute(primarySampleCount, primaryRadii);
+    await collectStationsNearExpectedStops(primaryRadii);
     console.log(`Built route-wide station pool with ${stationById.size} stations`);
 
     type PlannerNode = {
@@ -1116,15 +1276,38 @@ export async function analyzeEVRoute(
     };
 
     const findPath = (nodes: PlannerNode[]): PathResult => {
+      type PathState = {
+        stops: number;
+        totalDetourKm: number;
+        chargingPowerScore: number;
+        prevIndex: number;
+      };
+
+      const isBetterState = (candidate: PathState, current?: PathState | null): boolean => {
+        if (!current) return true;
+        if (candidate.stops !== current.stops) return candidate.stops < current.stops;
+        if (Math.abs(candidate.totalDetourKm - current.totalDetourKm) > 0.01) {
+          return candidate.totalDetourKm < current.totalDetourKm;
+        }
+        if (Math.abs(candidate.chargingPowerScore - current.chargingPowerScore) > 0.001) {
+          return candidate.chargingPowerScore > current.chargingPowerScore;
+        }
+        return false;
+      };
+
       const destinationIndex = nodes.length - 1;
-      const visited = new Array<boolean>(nodes.length).fill(false);
-      const prev = new Array<number>(nodes.length).fill(-1);
-      const queue: number[] = [0];
-      visited[0] = true;
+      const states: Array<PathState | null> = new Array(nodes.length).fill(null);
+      states[0] = {
+        stops: 0,
+        totalDetourKm: 0,
+        chargingPowerScore: 0,
+        prevIndex: -1,
+      };
       let furthestIndex = 0;
 
-      while (queue.length > 0) {
-        const fromIndex = queue.shift() as number;
+      for (let fromIndex = 0; fromIndex < nodes.length; fromIndex += 1) {
+        const fromState = states[fromIndex];
+        if (!fromState) continue;
         if (nodes[fromIndex].distanceKm > nodes[furthestIndex].distanceKm) {
           furthestIndex = fromIndex;
         }
@@ -1134,23 +1317,40 @@ export async function analyzeEVRoute(
         const availableKm = maxLegReachKm(departureBatteryPercent);
 
         for (let toIndex = fromIndex + 1; toIndex < nodes.length; toIndex += 1) {
-          if (visited[toIndex]) continue;
           const requiredKm = legDistanceKm(nodes[fromIndex], nodes[toIndex]);
-          if (requiredKm <= availableKm + 0.01) {
-            visited[toIndex] = true;
-            prev[toIndex] = fromIndex;
-            queue.push(toIndex);
+          if (requiredKm > availableKm + 0.01) continue;
+
+          const toNode = nodes[toIndex];
+          const stopIncrement = toNode.type === 'station' ? 1 : 0;
+          const detourIncrement = toNode.type === 'station' ? toNode.detourKm : 0;
+          const powerIncrement =
+            toNode.type === 'station'
+              ? clampNumber(
+                  ((toNode.station?.power_kW || DEFAULT_CHARGING_POWER_KW) / 150),
+                  0,
+                  1
+                )
+              : 0;
+          const candidateState: PathState = {
+            stops: fromState.stops + stopIncrement,
+            totalDetourKm: fromState.totalDetourKm + detourIncrement,
+            chargingPowerScore: fromState.chargingPowerScore + powerIncrement,
+            prevIndex: fromIndex,
+          };
+
+          if (isBetterState(candidateState, states[toIndex])) {
+            states[toIndex] = candidateState;
           }
         }
       }
 
-      const reachedDestination = visited[destinationIndex];
+      const reachedDestination = states[destinationIndex] !== null;
       const endIndex = reachedDestination ? destinationIndex : furthestIndex;
       const pathIndices: number[] = [];
       let cursor = endIndex;
       while (cursor !== -1) {
         pathIndices.push(cursor);
-        cursor = prev[cursor];
+        cursor = states[cursor]?.prevIndex ?? -1;
       }
       pathIndices.reverse();
 
@@ -1189,11 +1389,13 @@ export async function analyzeEVRoute(
       };
     };
 
-    let plannerNodes = buildNodes(25);
+    const initialMaxDetourKm = clampNumber(fullChargeLegReachKm * 0.12, 20, 40);
+    let plannerNodes = buildNodes(initialMaxDetourKm);
     let pathResult = findPath(plannerNodes);
 
     if (!pathResult.reachedDestination) {
-      await collectStationsAlongRoute(48, [160, 380]);
+      await collectStationsAlongRoute(fallbackSampleCount, fallbackRadii);
+      await collectStationsNearExpectedStops(fallbackRadii);
       plannerNodes = buildNodes(); // Remove detour filtering in fallback mode
       pathResult = findPath(plannerNodes);
     }
@@ -1204,6 +1406,46 @@ export async function analyzeEVRoute(
     let departureBatteryPercent = currentBatteryPercent;
     let totalChargingDurationMinutes = 0;
     let totalEnergyToChargeKWh = 0;
+
+    const buildSuggestionStopsFromStart = (limit: number): ChargingStop[] => {
+      const startNode = plannerNodes[0];
+      const availableKm = maxLegReachKm(currentBatteryPercent);
+      const reachableStations = plannerNodes
+        .filter(
+          (node): node is StationPlannerNode =>
+            node.type === 'station' &&
+            legDistanceKm(startNode, node) <= availableKm + 0.01
+        )
+        .sort((a, b) => {
+          if (b.distanceKm !== a.distanceKm) return b.distanceKm - a.distanceKm;
+          const powerDelta = (b.station.power_kW || 0) - (a.station.power_kW || 0);
+          if (powerDelta !== 0) return powerDelta;
+          return a.detourKm - b.detourKm;
+        })
+        .slice(0, limit);
+
+      return reachableStations.map((node, index) => {
+        const legKm = legDistanceKm(startNode, node);
+        const batteryUsedPercent = (legKm / maxRangeKm) * 100;
+        const arrivalBatteryPercent = Math.max(0, currentBatteryPercent - batteryUsedPercent);
+        const batteryPercentToFill = Math.max(0, TARGET_CHARGE_PERCENT - arrivalBatteryPercent);
+        const energyToFillKWh = (battery_capacity_kWh * batteryPercentToFill) / 100;
+        const chargingMinutes = Math.max(1, Math.round((energyToFillKWh / chargingPower) * 60));
+
+        return {
+          stopIndex: index + 1,
+          station: {
+            ...node.station,
+            distanceFromRouteMeters: Math.round(node.detourKm * 1000),
+          },
+          distanceFromPreviousStopKm: Number(legKm.toFixed(2)),
+          arrivalBatteryPercent: Number(arrivalBatteryPercent.toFixed(1)),
+          departureBatteryPercent: TARGET_CHARGE_PERCENT,
+          energyAdded_kWh: Number(energyToFillKWh.toFixed(2)),
+          chargingDurationMinutes: chargingMinutes,
+        };
+      });
+    };
 
     for (let i = 1; i < pathNodes.length; i += 1) {
       const fromNode = pathNodes[i - 1];
@@ -1239,20 +1481,35 @@ export async function analyzeEVRoute(
       }
     }
 
-    recommendation.chargingStops = chargingStops;
-    recommendation.numberOfStops = chargingStops.length;
-    recommendation.targetBatteryPercent = TARGET_CHARGE_PERCENT;
-    recommendation.chargingDurationMinutes =
-      chargingStops.length > 0 ? chargingStops[0].chargingDurationMinutes : 0;
-    recommendation.energyToCharge_kWh =
-      chargingStops.length > 0 ? chargingStops[0].energyAdded_kWh : 0;
-    recommendation.totalChargingDurationMinutes = totalChargingDurationMinutes;
-    recommendation.totalEnergyToCharge_kWh = Number(totalEnergyToChargeKWh.toFixed(2));
     recommendation.canReachDestination = pathResult.reachedDestination;
 
     if (recommendation.canReachDestination) {
+      recommendation.chargingStops = chargingStops;
+      recommendation.suggestedChargingStops = [];
+      recommendation.numberOfStops = chargingStops.length;
+      recommendation.targetBatteryPercent = TARGET_CHARGE_PERCENT;
+      recommendation.chargingDurationMinutes =
+        chargingStops.length > 0 ? chargingStops[0].chargingDurationMinutes : 0;
+      recommendation.energyToCharge_kWh =
+        chargingStops.length > 0 ? chargingStops[0].energyAdded_kWh : 0;
+      recommendation.totalChargingDurationMinutes = totalChargingDurationMinutes;
+      recommendation.totalEnergyToCharge_kWh = Number(totalEnergyToChargeKWh.toFixed(2));
       recommendation.reason = `Charging plan found with ${chargingStops.length} stop${chargingStops.length === 1 ? '' : 's'} to cover the full route.`;
     } else {
+      const suggestedChargingStops =
+        chargingStops.length > 0
+          ? chargingStops.slice(0, MAX_PARTIAL_CHARGING_SUGGESTIONS)
+          : buildSuggestionStopsFromStart(MAX_PARTIAL_CHARGING_SUGGESTIONS);
+
+      recommendation.chargingStops = [];
+      recommendation.suggestedChargingStops = suggestedChargingStops;
+      recommendation.numberOfStops = 0;
+      recommendation.targetBatteryPercent = TARGET_CHARGE_PERCENT;
+      recommendation.chargingDurationMinutes = 0;
+      recommendation.energyToCharge_kWh = 0;
+      recommendation.totalChargingDurationMinutes = 0;
+      recommendation.totalEnergyToCharge_kWh = 0;
+
       const gap = pathResult.nearestGap;
       if (gap) {
         recommendation.reason += ` Coverage gap near km ${gap.fromKm.toFixed(
@@ -1262,6 +1519,12 @@ export async function analyzeEVRoute(
         )} km away (max reachable leg ${gap.availableKm.toFixed(1)} km at current strategy).`;
       } else {
         recommendation.reason += ' Unable to construct a full charging path with available station data.';
+      }
+
+      if (suggestedChargingStops.length > 0) {
+        recommendation.reason += ` Showing ${suggestedChargingStops.length} reachable charging suggestion${
+          suggestedChargingStops.length === 1 ? '' : 's'
+        } found along the route so far.`;
       }
     }
   }

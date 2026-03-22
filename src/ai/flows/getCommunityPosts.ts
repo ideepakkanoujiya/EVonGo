@@ -6,9 +6,8 @@
  */
 
 import { ai } from '@/ai/genkit';
-import { getFirebaseDb } from '@/lib/firebase';
+import { getFirebaseAdminDb } from '@/lib/firebase-admin';
 import type { CommunityPost } from '@/lib/types';
-import { collection, getDocs, orderBy, query } from 'firebase/firestore';
 import { z } from 'genkit';
 
 export const getCommunityPosts = ai.defineFlow(
@@ -18,10 +17,8 @@ export const getCommunityPosts = ai.defineFlow(
     outputSchema: z.array(z.any()), // Using z.any() to accommodate Firestore Timestamps
   },
   async () => {
-    const db = getFirebaseDb();
-    const postsCollection = collection(db, 'communityPosts');
-    const postsQuery = query(postsCollection, orderBy('timestamp', 'desc'));
-    const querySnapshot = await getDocs(postsQuery);
+    const db = getFirebaseAdminDb();
+    const querySnapshot = await db.collection('communityPosts').orderBy('timestamp', 'desc').get();
     
     const posts: CommunityPost[] = [];
     querySnapshot.forEach((doc) => {

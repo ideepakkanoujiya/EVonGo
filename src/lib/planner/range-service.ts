@@ -268,6 +268,7 @@ export async function predictTrafficAdjustedRange(
   
   // 1. Calculate Available Energy
   const batteryPercent = clamp(payload.battery_percent, 0, 100);
+  const fullBatteryEnergyWh = payload.battery_capacity_kWh * 1000;
   const availableEnergyWh = payload.battery_capacity_kWh * 1000 * (batteryPercent / 100);
   
   // 2. Attempt ML Prediction
@@ -307,8 +308,9 @@ export async function predictTrafficAdjustedRange(
         );
         modelUsed = data.prediction?.model_used || 'ml-v1';
         
-        // Derive base consumption from ML range for consistency
-        baseConsumptionWhPerKm = availableEnergyWh / mlRange;
+        // The ML endpoint predicts nominal/full-pack range, so calibrate
+        // baseline consumption from total pack energy instead of current SOC.
+        baseConsumptionWhPerKm = fullBatteryEnergyWh / mlRange;
       }
     }
   } catch (error) {

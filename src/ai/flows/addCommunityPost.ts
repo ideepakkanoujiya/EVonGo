@@ -6,8 +6,8 @@
  */
 
 import { ai } from '@/ai/genkit';
-import { getFirebaseDb } from '@/lib/firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { getFirebaseAdminDb } from '@/lib/firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
 import { z } from 'genkit';
 
 const AddCommunityPostSchema = z.object({
@@ -27,10 +27,10 @@ export const addCommunityPost = ai.defineFlow(
     outputSchema: z.void(),
   },
   async (post) => {
-    const db = getFirebaseDb();
-    await addDoc(collection(db, 'communityPosts'), {
+    const db = getFirebaseAdminDb();
+    await db.collection('communityPosts').add({
       ...post,
-      timestamp: serverTimestamp(),
+      timestamp: FieldValue.serverTimestamp(),
       replies: 0,
     });
   }

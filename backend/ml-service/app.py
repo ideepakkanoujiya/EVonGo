@@ -76,6 +76,95 @@ class EVRangePredictor:
         self.feature_sets = {}
         self.scalers = {}
         self.performance_metrics = {}
+    def normalize_prediction_input(self, input_data: Dict) -> Dict:
+        """Map incoming payloads to the feature names expected by saved ML models."""
+        normalized = dict(input_data or {})
+        aliases = [
+            ('Battery_Capacity_kWh', 'battery_capacity_kWh'),
+            ('Battery_Capacity_kWh', 'battery_capacity_kwh'),
+            ('battery_capacity_kWh', 'battery_capacity_kwh'),
+            ('Battery_Health_Percent', 'battery_health_percent'),
+            ('Battery_Health_%', 'battery_health_percent'),
+            ('Energy_Consumption_kWh_per_100km', 'energy_consumption_kWh_per_100km'),
+            ('Avg_Speed_kmh', 'avg_speed_kmh'),
+            ('Temperature_C', 'temperature_c'),
+            ('Mileage_km', 'mileage_km'),
+            ('Year', 'year'),
+            ('Max_Speed_kmh', 'max_speed_kmh'),
+            ('Top_Speed_kmh', 'top_speed_kmh'),
+            ('Acceleration_0_100_kmh_sec', 'acceleration_0_100_kmh_sec'),
+            ('Charging_Power_kW', 'charging_power_kw'),
+            ('System_Power_kW', 'system_power_kw'),
+            ('System_Torque_Nm', 'system_torque_nm'),
+            ('torque_nm', 'system_torque_nm'),
+        ]
+        for source_key, target_key in aliases:
+            if target_key not in normalized and normalized.get(source_key) not in (None, ''):
+                normalized[target_key] = normalized[source_key]
+
+        if (
+            'energy_consumption_kWh_per_100km' not in normalized and
+            normalized.get('efficiency_wh_per_km') not in (None, '')
+        ):
+            try:
+                normalized['energy_consumption_kWh_per_100km'] = (
+                    float(normalized['efficiency_wh_per_km']) / 10.0
+                )
+            except (TypeError, ValueError):
+                pass
+
+        if (
+            'efficiency_wh_per_km' not in normalized and
+            normalized.get('energy_consumption_kWh_per_100km') not in (None, '')
+        ):
+            try:
+                normalized['efficiency_wh_per_km'] = (
+                    float(normalized['energy_consumption_kWh_per_100km']) * 10.0
+                )
+            except (TypeError, ValueError):
+                pass
+
+        numeric_fields = set(RANGE_FEATURES_ML + [
+            'battery_capacity_kwh',
+            'efficiency_wh_per_km',
+            'system_torque_nm',
+        ])
+        for field in numeric_fields:
+            if normalized.get(field) in (None, ''):
+                continue
+            try:
+                normalized[field] = float(normalized[field])
+            except (TypeError, ValueError):
+                continue
+
+        if normalized.get('year') not in (None, ''):
+            try:
+                normalized['year'] = int(float(normalized['year']))
+            except (TypeError, ValueError):
+                pass
+
+        return normalized
+    def get_model_estimator(self, model):
+        """Return the fitted estimator regardless of pipeline step naming."""
+        named_steps = getattr(model, 'named_steps', {})
+        if 'regressor' in named_steps:
+            return named_steps['regressor']
+        if 'model' in named_steps:
+            return named_steps['model']
+        steps = getattr(model, 'steps', None)
+        if steps:
+            return steps[-1][1]
+        return model
+    def get_model_feature_names(self, model) -> List[str]:
+        """Extract the input feature names expected by a fitted pipeline."""
+        preprocessor = getattr(model, 'named_steps', {}).get('preprocessor')
+        if preprocessor is None:
+            return []
+        feature_names: List[str] = []
+        for _, _, columns in getattr(preprocessor, 'transformers_', []):
+            if isinstance(columns, (list, tuple, np.ndarray, pd.Index)):
+                feature_names.extend([str(column) for column in columns])
+        return feature_names
     def load_and_preprocess_data(self):
         """Load and preprocess all available datasets"""
         logger.info("🔄 Loading and preprocessing datasets...")
@@ -455,13 +544,12 @@ class EVRangePredictor:
                     model_type = list(self.models.keys())[0]
             model = self.models[model_type]
             # Create input dataframe
-            input_df = pd.DataFrame([input_data])
+            normalized_input = self.normalize_prediction_input(input_data)
+            input_df = pd.DataFrame([normalized_input])
             # Ensure all required features are present with defaults
-            required_features = [
-                'battery_capacity_kWh', 'battery_health_percent', 'energy_consumption_kWh_per_100km',
-                'avg_speed_kmh', 'temperature_c', 'mileage_km', 'year', 'max_speed_kmh',
-                'acceleration_0_100_kmh_sec', 'charging_power_kw'
-            ]
+            required_features = set(self.get_model_feature_names(model))
+            required_features.update(RANGE_FEATURES_ML)
+            required_features.update(['battery_capacity_kwh', 'efficiency_wh_per_km'])
             for feat in required_features:
                 if feat not in input_df.columns:
                     if feat == 'year':
@@ -471,24 +559,37 @@ class EVRangePredictor:
                     else:
                         input_df[feat] = 0.0
             # Add engineered features
+            safe_consumption = None
             if 'battery_capacity_kWh' in input_df.columns and 'energy_consumption_kWh_per_100km' in input_df.columns:
+                safe_consumption = pd.to_numeric(
+                    input_df['energy_consumption_kWh_per_100km'], errors='coerce'
+                ).replace(0, np.nan)
                 input_df['battery_efficiency_score'] = (
-                    input_df['battery_capacity_kWh'] / input_df['energy_consumption_kWh_per_100km'] * 100
+                    pd.to_numeric(input_df['battery_capacity_kWh'], errors='coerce') /
+                    safe_consumption * 100
                 )
             if 'battery_health_percent' in input_df.columns and 'battery_capacity_kWh' in input_df.columns:
                 input_df['effective_battery_capacity'] = (
-                    input_df['battery_capacity_kWh'] * (input_df['battery_health_percent'] / 100)
+                    pd.to_numeric(input_df['battery_capacity_kWh'], errors='coerce') *
+                    (pd.to_numeric(input_df['battery_health_percent'], errors='coerce') / 100)
                 )
             if 'year' in input_df.columns:
-                input_df['vehicle_age'] = datetime.now().year - input_df['year']
+                input_df['vehicle_age'] = datetime.now().year - pd.to_numeric(
+                    input_df['year'], errors='coerce'
+                )
             if 'avg_speed_kmh' in input_df.columns and 'energy_consumption_kWh_per_100km' in input_df.columns:
+                if safe_consumption is None:
+                    safe_consumption = pd.to_numeric(
+                        input_df['energy_consumption_kWh_per_100km'], errors='coerce'
+                    ).replace(0, np.nan)
                 input_df['speed_efficiency_factor'] = (
-                    input_df['avg_speed_kmh'] / input_df['energy_consumption_kWh_per_100km']
+                    pd.to_numeric(input_df['avg_speed_kmh'], errors='coerce') / safe_consumption
                 )
             # Predict
             prediction = model.predict(input_df)[0]
             # Get prediction interval (approximate)
-            if hasattr(model.named_steps['regressor'], 'feature_importances_'):
+            estimator = self.get_model_estimator(model)
+            if hasattr(estimator, 'feature_importances_'):
                 uncertainty = prediction * 0.05  # 5% uncertainty estimate
             else:
                 uncertainty = prediction * 0.08  # 8% for ensemble
@@ -741,28 +842,7 @@ def predict_range_endpoint():
     try:
         data = request.json or {}
         model_type = data.get('model_type', 'best')
-        try:
-            result = predictor.predict_range(data, model_type)
-        except Exception as prediction_error:
-            if 'No trained models available' not in str(prediction_error):
-                raise
-            # Compatibility fallback when models are unavailable
-            battery_capacity = float(data.get('Battery_Capacity_kWh', data.get('battery_capacity_kWh', 0)))
-            efficiency = float(data.get('Energy_Consumption_kWh_per_100km', data.get('energy_consumption_kWh_per_100km', 0)))
-            if battery_capacity <= 0 or efficiency <= 0:
-                raise
-            predicted = (battery_capacity / efficiency) * 100
-            result = {
-                'predicted_range_km': float(predicted),
-                'uncertainty_km': float(predicted * 0.12),
-                'confidence_interval': [
-                    float(predicted * 0.88),
-                    float(predicted * 1.12)
-                ],
-                'confidence_score': 0.5,
-                'model_used': 'formula_fallback',
-                'model_performance': {}
-            }
+        result = predictor.predict_range(data, model_type)
         return jsonify({
             'success': True,
             'predicted_range_km': round(float(result.get('predicted_range_km', 0)), 1),
@@ -770,6 +850,10 @@ def predict_range_endpoint():
         })
     except Exception as e:
         logger.error(f"Error in /predict-range: {e}")
+        if 'No trained models available' in str(e):
+            return jsonify({
+                'error': 'ML range model unavailable. Train or load a model before predicting range.'
+            }), 503
         return jsonify({'error': str(e)}), 500
 @app.route('/predict-with-conditions', methods=['POST'])
 def predict_with_conditions_endpoint():
@@ -913,33 +997,19 @@ def predict_real_world_range():
     """Compatibility endpoint for real-world range prediction."""
     try:
         data = request.json or {}
-        battery_capacity = float(data.get('Battery_Capacity_kWh', data.get('battery_capacity_kWh', 0)))
-        battery_health = float(data.get('Battery_Health_Percent', data.get('Battery_Health_%', 100)))
-        consumption = float(data.get('Energy_Consumption_kWh_per_100km', data.get('energy_consumption_kWh_per_100km', 0)))
-        avg_speed = float(data.get('Avg_Speed_kmh', data.get('avg_speed_kmh', 50)))
-        temperature = float(data.get('Temperature_C', data.get('temperature_c', 25)))
-        mileage = float(data.get('Mileage_km', data.get('mileage_km', 0)))
-        if battery_capacity <= 0 or consumption <= 0:
-            return jsonify({'error': 'Battery capacity and consumption must be positive'}), 400
-        base_range = (battery_capacity / consumption) * 100
-        health_factor = max(0.6, min(1.05, battery_health / 100))
-        speed_factor = 1.0
-        if avg_speed > 100:
-            speed_factor = 0.88
-        elif avg_speed > 80:
-            speed_factor = 0.94
-        elif avg_speed < 25:
-            speed_factor = 0.92
-        temp_factor = 1.0 - min(0.15, max(0, abs(25 - temperature) * 0.004))
-        mileage_factor = max(0.85, 1.0 - (mileage / 250000) * 0.1)
-        prediction = base_range * health_factor * speed_factor * temp_factor * mileage_factor
+        result = predictor.predict_range(data, data.get('model_type', 'best'))
         return jsonify({
             'success': True,
-            'predicted_range_km': round(float(prediction), 1),
+            'predicted_range_km': round(float(result.get('predicted_range_km', 0)), 1),
+            'prediction': result,
             'input': data
         })
     except Exception as e:
         logger.error(f"Error in /predict-real-world-range: {e}")
+        if 'No trained models available' in str(e):
+            return jsonify({
+                'error': 'ML range model unavailable. Train or load a model before predicting range.'
+            }), 503
         return jsonify({'error': str(e)}), 500
 @app.route('/efficiency-rankings', methods=['GET'])
 def efficiency_rankings():

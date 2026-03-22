@@ -112,6 +112,7 @@ export type EVChargingRecommendation = {
   station?: EVChargingStation;
   stations?: EVChargingStation[];
   chargingStops: ChargingStop[];
+  suggestedChargingStops?: ChargingStop[];
   arrivalBatteryPercent: number;
   targetBatteryPercent: number;
   chargingDurationMinutes: number;

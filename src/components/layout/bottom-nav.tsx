@@ -3,16 +3,16 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Map } from 'lucide-react';
+import { Bot, Fuel, Map, User, Users, Wrench } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const navItems = [
   { href: '/planner', label: 'Planner', icon: Map },
-  // { href: '/stations', label: 'Stations', icon: Fuel },
-  // { href: '/service-centers', label: 'Service', icon: Wrench },
-  // { href: '/community', label: 'Community', icon: Users },
-  // { href: '/assistant', label: 'Assistant', icon: Bot },
-  // { href: '/profile', label: 'Profile', icon: User },
+  { href: '/stations', label: 'Stations', icon: Fuel },
+  { href: '/service-centers', label: 'Service', icon: Wrench },
+  { href: '/community', label: 'Community', icon: Users },
+  { href: '/assistant', label: 'Assistant', icon: Bot },
+  { href: '/profile', label: 'Profile', icon: User },
 ];
 
 export function BottomNav() {

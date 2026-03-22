@@ -22,10 +22,10 @@ import { cn } from '@/lib/utils';
 
 const featureNavItems = [
   { href: '/planner', label: 'Planner' },
-  // { href: '/stations', label: 'Stations' },
-  // { href: '/service-centers', label: 'Service' },
-  // { href: '/assistant', label: 'Assistant' },
-  // { href: '/community', label: 'Community' },
+  { href: '/stations', label: 'Stations' },
+  { href: '/service-centers', label: 'Service' },
+  { href: '/assistant', label: 'Assistant' },
+  { href: '/community', label: 'Community' },
   // { href: '/dashboard', label: 'Dashboard' },
   // { href: '/rewards', label: 'Rewards' },
   // { href: '/vehicle-log', label: 'Vehicle Log' },

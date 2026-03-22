@@ -4,11 +4,9 @@
 import { suggestChargingStops, type SuggestChargingStopsOutput } from '@/ai/flows/suggest-charging-stops';
 import { findEVChargingStations, type FindEVChargingStationsOutput } from '@/ai/flows/find-charging-stations';
 import { findServiceCenters, type FindServiceCentersOutput } from '@/ai/flows/find-service-centers';
-import { addCommunityPost } from '@/ai/flows/addCommunityPost';
 import { diagnoseProblem, type DiagnoseProblemOutput } from '@/ai/flows/diagnose-problem';
 import { transcribeAudio } from '@/ai/flows/transcribe-audio';
 import { textToSpeech } from '@/ai/flows/text-to-speech';
-
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 
@@ -132,50 +130,6 @@ export async function searchServiceCenters(prevState: ServiceCenterState, formDa
         console.error('Error searching service centers:', error);
         return { message: 'Failed to find service centers.' };
     }
-}
-
-const PostSchema = z.object({
-  title: z.string().min(1, 'Title is required'),
-  content: z.string().min(1, 'Content is required'),
-  userId: z.string(),
-  author: z.string(),
-  avatarUrl: z.string().url().optional(),
-});
-
-export type PostState = {
-  message?: string | null;
-  errors?: {
-    title?: string[];
-    content?: string[];
-  };
-}
-
-export async function createPost(prevState: PostState, formData: FormData) {
-  const validatedFields = PostSchema.safeParse({
-    title: formData.get('title'),
-    content: formData.get('content'),
-    userId: formData.get('userId'),
-    author: formData.get('author'),
-    avatarUrl: formData.get('avatarUrl'),
-  });
-
-  if (!validatedFields.success) {
-    return {
-      errors: validatedFields.error.flatten().fieldErrors,
-      message: 'Invalid input. Please check the fields.',
-    };
-  }
-
-  try {
-    await addCommunityPost(validatedFields.data);
-    revalidatePath('/community');
-    return { message: 'Post created successfully.' };
-  } catch (error) {
-    console.error('Error creating post:', error);
-    return {
-      message: 'Failed to create post. Please try again.',
-    };
-  }
 }
 
 const fileToDataURI = async (file: File) => {

@@ -26,11 +26,12 @@ export async function predictRange(data: RangePredictionInput): Promise<APIRespo
       body: JSON.stringify(data),
     });
 
+    const raw = await response.json().catch(() => null);
+
     if (!response.ok) {
-      throw new Error('Failed to predict range');
+      throw new Error(raw?.error || 'Failed to predict range');
     }
 
-    const raw = await response.json();
     const predicted =
       typeof raw?.predicted_range_km === 'number'
         ? raw.predicted_range_km
@@ -62,11 +63,12 @@ export async function predictRealWorldRange(data: RealWorldRangeInput): Promise<
       body: JSON.stringify(data),
     });
 
+    const raw = await response.json().catch(() => null);
+
     if (!response.ok) {
-      throw new Error('Failed to predict real-world range');
+      throw new Error(raw?.error || 'Failed to predict real-world range');
     }
 
-    const raw = await response.json();
     const predicted = raw?.predicted_range_km;
     if (typeof predicted !== 'number') {
       throw new Error('Invalid real-world range response');

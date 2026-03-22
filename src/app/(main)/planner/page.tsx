@@ -247,10 +247,17 @@ export default function PlannerPage() {
     if (!result || !selectedRoute) return false;
     return result.evAnalysis.currentRangeKm >= selectedRoute.distanceKm;
   }, [result, selectedRoute]);
-  const chargingStops = useMemo(
-    () => recommendation?.chargingStops ?? [],
-    [recommendation?.chargingStops]
-  );
+  const displayedStops = useMemo(() => {
+    if (!recommendation) return [];
+    if (recommendation.canReachDestination) {
+      return recommendation.chargingStops ?? [];
+    }
+    return recommendation.suggestedChargingStops ?? [];
+  }, [
+    recommendation?.canReachDestination,
+    recommendation?.chargingStops,
+    recommendation?.suggestedChargingStops,
+  ]);
 
   useEffect(() => {
     let active = true;
@@ -366,16 +373,16 @@ export default function PlannerPage() {
       destination: `${selectedRoute.destination.lat},${selectedRoute.destination.lng}`,
       travelmode: 'driving',
     });
-    if (chargingStops.length > 0) {
+    if (displayedStops.length > 0) {
       params.set(
         'waypoints',
-        chargingStops
+        displayedStops
           .map((stop) => `${stop.station.location.lat},${stop.station.location.lng}`)
           .join('|')
       );
     }
     return `https://www.google.com/maps/dir/?${params.toString()}`;
-  }, [chargingStops, selectedRoute]);
+  }, [displayedStops, selectedRoute]);
 
   const refreshLeafletMap = useCallback(async () => {
     if (!selectedRoute || !mapContainerRef.current) return;
@@ -433,7 +440,7 @@ export default function PlannerPage() {
 
       L.marker(origin, { icon: startIcon }).bindPopup('Start').addTo(layer);
       L.marker(destination, { icon: destinationIcon }).bindPopup('Destination').addTo(layer);
-      chargingStops.forEach((stop) => {
+      displayedStops.forEach((stop) => {
         const chargingIcon = createMarkerIcon(`C${stop.stopIndex}`, '#f59e0b');
         L.marker([stop.station.location.lat, stop.station.location.lng], {
           icon: chargingIcon,
@@ -443,7 +450,7 @@ export default function PlannerPage() {
       });
 
       const bounds = L.latLngBounds([origin, destination]);
-      chargingStops.forEach((stop) => {
+      displayedStops.forEach((stop) => {
         bounds.extend([stop.station.location.lat, stop.station.location.lng]);
       });
       if (bounds.isValid()) {
@@ -454,7 +461,7 @@ export default function PlannerPage() {
       const message = mapError instanceof Error ? mapError.message : 'Unable to load map';
       setLeafletLoadError(message);
     }
-  }, [chargingStops, routePath, selectedRoute]);
+  }, [displayedStops, routePath, selectedRoute]);
 
   useEffect(() => {
     void refreshLeafletMap();
@@ -874,23 +881,36 @@ export default function PlannerPage() {
                 </div>
               )}
 
-              {result.evAnalysis.recommendation.numberOfStops > 0 && (
+              {displayedStops.length > 0 && (
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <h4 className="text-lg font-semibold">
-                      {result.evAnalysis.recommendation.numberOfStops} Charging Stop
-                      {result.evAnalysis.recommendation.numberOfStops > 1 ? 's' : ''} Required
+                      {displayedStops.length}{' '}
+                      {result.evAnalysis.recommendation.canReachDestination
+                        ? 'Charging Stop'
+                        : 'Charging Suggestion'}
+                      {displayedStops.length > 1 ? 's' : ''}{' '}
+                      {result.evAnalysis.recommendation.canReachDestination ? 'Required' : 'Found'}
                     </h4>
-                    <div className="text-right">
-                      <p className="text-sm text-gray-600">Total Charging Time</p>
-                      <p className="text-xl font-bold text-green-600">
-                        {formatDuration(result.evAnalysis.recommendation.totalChargingDurationMinutes)}
-                      </p>
-                    </div>
+                    {result.evAnalysis.recommendation.canReachDestination ? (
+                      <div className="text-right">
+                        <p className="text-sm text-gray-600">Total Charging Time</p>
+                        <p className="text-xl font-bold text-green-600">
+                          {formatDuration(result.evAnalysis.recommendation.totalChargingDurationMinutes)}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="text-right">
+                        <p className="text-sm text-gray-600">Coverage Status</p>
+                        <p className="text-sm font-semibold text-orange-600">
+                          Partial route coverage only
+                        </p>
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-3">
-                    {result.evAnalysis.recommendation.chargingStops.map((stop) => (
+                    {displayedStops.map((stop) => (
                       <div
                         key={stop.stopIndex}
                         className="rounded-lg border border-gray-200 bg-white p-4 transition-shadow hover:shadow-md"
@@ -949,40 +969,47 @@ export default function PlannerPage() {
                     ))}
                   </div>
 
-                  <div className="mt-4 rounded-lg bg-gray-50 p-4">
-                    <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-                      <div>
-                        <p className="text-xs text-gray-600">Total Stops</p>
-                        <p className="text-lg font-bold">
-                          {result.evAnalysis.recommendation.numberOfStops}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-600">Total Charging Time</p>
-                        <p className="text-lg font-bold text-green-600">
-                          {formatDuration(result.evAnalysis.recommendation.totalChargingDurationMinutes)}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-600">Total Energy</p>
-                        <p className="text-lg font-bold">
-                          {result.evAnalysis.recommendation.totalEnergyToCharge_kWh} kWh
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-600">Final Battery</p>
-                        <p
-                          className={`text-lg font-bold ${
-                            result.evAnalysis.recommendation.arrivalBatteryPercent > 20
-                              ? 'text-green-600'
-                              : 'text-orange-600'
-                          }`}
-                        >
-                          {result.evAnalysis.recommendation.arrivalBatteryPercent.toFixed(1)}%
-                        </p>
+                  {result.evAnalysis.recommendation.canReachDestination ? (
+                    <div className="mt-4 rounded-lg bg-gray-50 p-4">
+                      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+                        <div>
+                          <p className="text-xs text-gray-600">Total Stops</p>
+                          <p className="text-lg font-bold">
+                            {result.evAnalysis.recommendation.numberOfStops}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-600">Total Charging Time</p>
+                          <p className="text-lg font-bold text-green-600">
+                            {formatDuration(result.evAnalysis.recommendation.totalChargingDurationMinutes)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-600">Total Energy</p>
+                          <p className="text-lg font-bold">
+                            {result.evAnalysis.recommendation.totalEnergyToCharge_kWh} kWh
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-600">Final Battery</p>
+                          <p
+                            className={`text-lg font-bold ${
+                              result.evAnalysis.recommendation.arrivalBatteryPercent > 20
+                                ? 'text-green-600'
+                                : 'text-orange-600'
+                            }`}
+                          >
+                            {result.evAnalysis.recommendation.arrivalBatteryPercent.toFixed(1)}%
+                          </p>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                      These suggestions are reachable with the current analysis, but they do not yet
+                      form a complete charging plan to the destination.
+                    </div>
+                  )}
                 </div>
               )}
 

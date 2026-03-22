@@ -1,6 +1,3 @@
-
-import type { Timestamp } from 'firebase/firestore';
-
 export type EVChargingStation = {
   id: string;
   name: string;
@@ -35,10 +32,22 @@ export type ServiceRecord = {
 export type CommunityPost = {
   id: string;
   author: string;
-  avatarUrl: string;
+  avatarUrl?: string;
   title: string;
   content: string;
-  timestamp: Timestamp | Date | string; // Allow multiple types for flexibility
+  timestamp: Date | string | null;
   userId: string;
   replies: number;
+  likes: number;
+  likedByUserIds?: string[];
+};
+
+export type CommunityReply = {
+  id: string;
+  postId: string;
+  author: string;
+  avatarUrl?: string;
+  content: string;
+  timestamp: Date | string | null;
+  userId: string;
 };
