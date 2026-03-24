@@ -38,17 +38,14 @@ export type TrafficRangeRequest = {
   avg_speed: number;
   congestion_factor: number;
   trip_distance_km: number;
-  total_elevation_gain_m: number;
-  avg_gradient_percent: number;
-  temperature_c: number;
-  wind_speed_kmh: number;
-  precipitation_mm: number;
 };
 
 export type TrafficRangeResponse = {
   success: boolean;
   baseRangeKm: number;
   trafficAdjustedRangeKm: number;
+  trafficCondition: 'no_traffic' | 'low_traffic' | 'high_traffic';
+  trafficRangeFactor: number;
   speedPenaltyPercent: number;
   trafficPenaltyPercent: number;
   elevationPenaltyPercent: number;
@@ -129,6 +126,7 @@ export type EVRouteAnalysis = {
     maxRangeKm: number;
     currentRangeKm: number;
     consumptionPerKm: number;
+    range: TrafficRangeResponse;
     recommendation: EVChargingRecommendation;
   };
 };

@@ -20,6 +20,11 @@ type PlannerFormState = {
   destination: string;
   vehicleMake: string;
   vehicleModel: string;
+  battery_capacity_kWh: string;
+  efficiency_wh_per_km: string;
+  torque_nm: string;
+  top_speed_kmh: string;
+  maxChargingPower_kW: string;
   batteryPercent: number;
 };
 
@@ -49,6 +54,11 @@ const DEFAULT_FORM: PlannerFormState = {
   destination: '',
   vehicleMake: '',
   vehicleModel: '',
+  battery_capacity_kWh: '',
+  efficiency_wh_per_km: '',
+  torque_nm: '',
+  top_speed_kmh: '',
+  maxChargingPower_kW: '',
   batteryPercent: 80,
 };
 
@@ -192,13 +202,64 @@ function formatDistance(distanceMeters: number): string {
   return `${(distanceMeters / 1000).toFixed(2)} km`;
 }
 
+function formatTrafficCondition(condition?: 'no_traffic' | 'low_traffic' | 'high_traffic'): string {
+  switch (condition) {
+    case 'no_traffic':
+      return 'No Traffic';
+    case 'low_traffic':
+      return 'Low Traffic';
+    case 'high_traffic':
+      return 'High Traffic';
+    default:
+      return 'Unknown';
+  }
+}
+
 function validatePlannerForm(form: PlannerFormState): string | null {
+  const batteryCapacity = Number(form.battery_capacity_kWh);
+  const efficiency = Number(form.efficiency_wh_per_km);
+  const torque = Number(form.torque_nm);
+  const topSpeed = Number(form.top_speed_kmh);
+  const chargingPower = Number(form.maxChargingPower_kW);
+
   if (form.origin.trim().length < 3) return 'Origin must be at least 3 characters.';
   if (form.destination.trim().length < 3) return 'Destination must be at least 3 characters.';
   if (!form.vehicleMake.trim()) return 'EV make is required.';
   if (!form.vehicleModel.trim()) return 'EV model is required.';
+  if (!Number.isFinite(batteryCapacity) || batteryCapacity < 10 || batteryCapacity > 250) {
+    return 'Battery capacity must be between 10 and 250 kWh.';
+  }
+  if (!Number.isFinite(efficiency) || efficiency < 60 || efficiency > 400) {
+    return 'Efficiency must be between 60 and 400 Wh/km.';
+  }
+  if (!Number.isFinite(torque) || torque < 50 || torque > 2000) {
+    return 'Torque must be between 50 and 2000 Nm.';
+  }
+  if (!Number.isFinite(topSpeed) || topSpeed < 60 || topSpeed > 350) {
+    return 'Top speed must be between 60 and 350 km/h.';
+  }
+  if (!Number.isFinite(chargingPower) || chargingPower < 10 || chargingPower > 350) {
+    return 'Max charging power must be between 10 and 350 kW.';
+  }
   if (form.batteryPercent < 0 || form.batteryPercent > 100) return 'Battery percent must be between 0 and 100.';
   return null;
+}
+
+function getVehicleSpecFormPatch(vehicle: VehicleOption) {
+  return {
+    battery_capacity_kWh: String(vehicle.battery_capacity_kWh),
+    efficiency_wh_per_km: String(Math.round(vehicle.efficiency_wh_per_km)),
+    torque_nm: String(Math.round(vehicle.torque_nm)),
+    top_speed_kmh: String(Math.round(vehicle.top_speed_kmh)),
+    maxChargingPower_kW: String(vehicle.maxChargingPower_kW),
+  } satisfies Pick<
+    PlannerFormState,
+    | 'battery_capacity_kWh'
+    | 'efficiency_wh_per_km'
+    | 'torque_nm'
+    | 'top_speed_kmh'
+    | 'maxChargingPower_kW'
+  >;
 }
 
 export default function PlannerPage() {
@@ -244,20 +305,27 @@ export default function PlannerPage() {
   const selectedRoute = useMemo(() => result?.metrics?.[0] ?? null, [result]);
   const recommendation = result?.evAnalysis.recommendation;
   const hasDirectRange = useMemo(() => {
-    if (!result || !selectedRoute) return false;
-    return result.evAnalysis.currentRangeKm >= selectedRoute.distanceKm;
-  }, [result, selectedRoute]);
+    if (!result || !selectedRoute || !recommendation) return false;
+    return !recommendation.needed;
+  }, [recommendation, result, selectedRoute]);
   const displayedStops = useMemo(() => {
     if (!recommendation) return [];
     if (recommendation.canReachDestination) {
       return recommendation.chargingStops ?? [];
     }
     return recommendation.suggestedChargingStops ?? [];
-  }, [
-    recommendation?.canReachDestination,
-    recommendation?.chargingStops,
-    recommendation?.suggestedChargingStops,
-  ]);
+  }, [recommendation]);
+  const displayedChargingDurationMinutes = useMemo(
+    () => displayedStops.reduce((sum, stop) => sum + stop.chargingDurationMinutes, 0),
+    [displayedStops]
+  );
+  const displayedEnergyKWh = useMemo(
+    () =>
+      Number(
+        displayedStops.reduce((sum, stop) => sum + stop.energyAdded_kWh, 0).toFixed(2)
+      ),
+    [displayedStops]
+  );
 
   useEffect(() => {
     let active = true;
@@ -288,6 +356,7 @@ export default function PlannerPage() {
             ...prev,
             vehicleMake: first.make,
             vehicleModel: first.optionId,
+            ...getVehicleSpecFormPatch(first),
           };
         });
       } catch (loadError) {
@@ -307,6 +376,7 @@ export default function PlannerPage() {
 
   useEffect(() => {
     if (!result || !selectedRoute || !recommendation || !user?.uid) return;
+    if (recommendation.needed && !recommendation.canReachDestination) return;
 
     const tripKey = [
       form.origin,
@@ -373,7 +443,7 @@ export default function PlannerPage() {
       destination: `${selectedRoute.destination.lat},${selectedRoute.destination.lng}`,
       travelmode: 'driving',
     });
-    if (displayedStops.length > 0) {
+    if (recommendation?.canReachDestination && displayedStops.length > 0) {
       params.set(
         'waypoints',
         displayedStops
@@ -382,7 +452,7 @@ export default function PlannerPage() {
       );
     }
     return `https://www.google.com/maps/dir/?${params.toString()}`;
-  }, [displayedStops, selectedRoute]);
+  }, [displayedStops, recommendation?.canReachDestination, selectedRoute]);
 
   const refreshLeafletMap = useCallback(async () => {
     if (!selectedRoute || !mapContainerRef.current) return;
@@ -544,6 +614,12 @@ export default function PlannerPage() {
     setError(null);
 
     try {
+      const batteryCapacity = Number(form.battery_capacity_kWh);
+      const efficiency = Number(form.efficiency_wh_per_km);
+      const torque = Number(form.torque_nm);
+      const topSpeed = Number(form.top_speed_kmh);
+      const chargingPower = Number(form.maxChargingPower_kW);
+
       if (!selectedVehicleOption) {
         throw new Error('Please select a valid EV make and model.');
       }
@@ -553,12 +629,12 @@ export default function PlannerPage() {
         batteryPercent: form.batteryPercent,
         vehicle: {
           evModel: selectedVehicleOption.model,
-          battery_capacity_kWh: selectedVehicleOption.battery_capacity_kWh,
-          efficiency_wh_per_km: selectedVehicleOption.efficiency_wh_per_km,
-          torque_nm: selectedVehicleOption.torque_nm,
-          top_speed_kmh: selectedVehicleOption.top_speed_kmh,
+          battery_capacity_kWh: batteryCapacity,
+          efficiency_wh_per_km: efficiency,
+          torque_nm: torque,
+          top_speed_kmh: topSpeed,
           connectorType: selectedVehicleOption.connectorType,
-          maxChargingPower_kW: selectedVehicleOption.maxChargingPower_kW,
+          maxChargingPower_kW: chargingPower,
         },
         alternatives: true,
       });
@@ -583,7 +659,7 @@ export default function PlannerPage() {
           <CardHeader>
             <CardTitle className="font-headline">Smart Route Planner</CardTitle>
             <CardDescription>
-              ML-driven range prediction with EV make/model selection and automatic charging stops.
+              ML-driven range prediction with EV make/model selection, manual EV specs, and automatic charging stops.
             </CardDescription>
           </CardHeader>
           <form onSubmit={submit}>
@@ -689,12 +765,13 @@ export default function PlannerPage() {
                 <Select
                   value={form.vehicleMake}
                   onValueChange={(value) => {
-                    const nextModel =
-                      vehicleOptions.find((vehicle) => vehicle.make === value)?.optionId ?? '';
+                    const nextVehicle =
+                      vehicleOptions.find((vehicle) => vehicle.make === value) ?? null;
                     setForm((prev) => ({
                       ...prev,
                       vehicleMake: value,
-                      vehicleModel: nextModel,
+                      vehicleModel: nextVehicle?.optionId ?? '',
+                      ...(nextVehicle ? getVehicleSpecFormPatch(nextVehicle) : {}),
                     }));
                   }}
                   disabled={vehicleOptionsLoading || makeOptions.length === 0}
@@ -716,7 +793,15 @@ export default function PlannerPage() {
                 <Label htmlFor="ev-model">EV Model</Label>
                 <Select
                   value={form.vehicleModel}
-                  onValueChange={(value) => handleChange('vehicleModel', value)}
+                  onValueChange={(value) => {
+                    const nextVehicle =
+                      vehicleOptions.find((vehicle) => vehicle.optionId === value) ?? null;
+                    setForm((prev) => ({
+                      ...prev,
+                      vehicleModel: value,
+                      ...(nextVehicle ? getVehicleSpecFormPatch(nextVehicle) : {}),
+                    }));
+                  }}
                   disabled={!form.vehicleMake || modelOptions.length === 0}
                 >
                   <SelectTrigger id="ev-model">
@@ -735,8 +820,9 @@ export default function PlannerPage() {
                 )}
                 {!vehicleOptionsLoadError && selectedVehicleOption && (
                   <p className="text-xs text-muted-foreground">
-                    Specs auto-filled: {selectedVehicleOption.battery_capacity_kWh} kWh,{' '}
-                    {selectedVehicleOption.efficiency_wh_per_km} Wh/km
+                    Dataset reference: {selectedVehicleOption.battery_capacity_kWh} kWh,{' '}
+                    {selectedVehicleOption.efficiency_wh_per_km} Wh/km. Enter the specs below to
+                    run the planner.
                   </p>
                 )}
                 {!vehicleOptionsLoadError && vehicleOptions.length > 0 && (
@@ -745,6 +831,83 @@ export default function PlannerPage() {
                     from dataset
                   </p>
                 )}
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="battery-capacity">Battery Capacity (kWh)</Label>
+                  <Input
+                    id="battery-capacity"
+                    type="number"
+                    min="10"
+                    max="250"
+                    step="0.1"
+                    value={form.battery_capacity_kWh}
+                    onChange={(event) => handleChange('battery_capacity_kWh', event.target.value)}
+                    placeholder="e.g., 75"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="efficiency-wh-per-km">Efficiency (Wh/km)</Label>
+                  <Input
+                    id="efficiency-wh-per-km"
+                    type="number"
+                    min="60"
+                    max="400"
+                    step="1"
+                    value={form.efficiency_wh_per_km}
+                    onChange={(event) => handleChange('efficiency_wh_per_km', event.target.value)}
+                    placeholder="e.g., 145"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="torque-nm">Torque (Nm)</Label>
+                  <Input
+                    id="torque-nm"
+                    type="number"
+                    min="50"
+                    max="2000"
+                    step="1"
+                    value={form.torque_nm}
+                    onChange={(event) => handleChange('torque_nm', event.target.value)}
+                    placeholder="e.g., 320"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="top-speed-kmh">Top Speed (km/h)</Label>
+                  <Input
+                    id="top-speed-kmh"
+                    type="number"
+                    min="60"
+                    max="350"
+                    step="1"
+                    value={form.top_speed_kmh}
+                    onChange={(event) => handleChange('top_speed_kmh', event.target.value)}
+                    placeholder="e.g., 160"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="max-charging-power-kw">Max Charging Power (kW)</Label>
+                <Input
+                  id="max-charging-power-kw"
+                  type="number"
+                  min="10"
+                  max="350"
+                  step="0.1"
+                  value={form.maxChargingPower_kW}
+                  onChange={(event) => handleChange('maxChargingPower_kW', event.target.value)}
+                  placeholder="e.g., 100"
+                  required
+                />
               </div>
 
               <div className="space-y-4">
@@ -791,8 +954,8 @@ export default function PlannerPage() {
             </div>
             <h3 className="font-headline text-xl font-bold">Traffic-Aware Plan Awaits</h3>
             <p className="mt-2 max-w-sm text-muted-foreground">
-              Enter route plus EV make/model to compute ML-based range, traffic impact, and charging
-              feasibility.
+              Enter your route, EV make/model, and manual vehicle specs to compute ML-based range,
+              traffic impact, and charging feasibility.
             </p>
           </Card>
         ) : !selectedRoute ? (
@@ -825,6 +988,9 @@ export default function PlannerPage() {
                   <div className="rounded-lg bg-secondary p-4">
                     <p className="text-xs text-muted-foreground">Congestion Ratio</p>
                     <p className="text-2xl font-bold">{selectedRoute.congestionRatio}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {formatTrafficCondition(result.evAnalysis.range?.trafficCondition)}
+                    </p>
                   </div>
                 </div>
               </CardContent>
@@ -863,7 +1029,10 @@ export default function PlannerPage() {
                   <p className="text-2xl font-bold text-blue-600">
                     {result.evAnalysis.consumptionPerKm.toFixed(3)} kWh/km
                   </p>
-                  <p className="mt-1 text-sm text-gray-500">Average energy usage</p>
+                  <p className="mt-1 text-sm text-gray-500">
+                    {formatTrafficCondition(result.evAnalysis.range?.trafficCondition)} factor:{' '}
+                    {result.evAnalysis.range?.trafficRangeFactor?.toFixed(2) ?? 'N/A'}x
+                  </p>
                 </div>
               </div>
 
@@ -901,7 +1070,10 @@ export default function PlannerPage() {
                       </div>
                     ) : (
                       <div className="text-right">
-                        <p className="text-sm text-gray-600">Coverage Status</p>
+                        <p className="text-sm text-gray-600">Shown Charging Time</p>
+                        <p className="text-lg font-bold text-orange-600">
+                          {formatDuration(displayedChargingDurationMinutes)}
+                        </p>
                         <p className="text-sm font-semibold text-orange-600">
                           Partial route coverage only
                         </p>
@@ -1005,9 +1177,37 @@ export default function PlannerPage() {
                       </div>
                     </div>
                   ) : (
-                    <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-                      These suggestions are reachable with the current analysis, but they do not yet
-                      form a complete charging plan to the destination.
+                    <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+                        <div>
+                          <p className="text-xs text-amber-700">Suggestions Shown</p>
+                          <p className="text-lg font-bold text-amber-900">
+                            {displayedStops.length}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-amber-700">Shown Charging Time</p>
+                          <p className="text-lg font-bold text-amber-900">
+                            {formatDuration(displayedChargingDurationMinutes)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-amber-700">Shown Energy</p>
+                          <p className="text-lg font-bold text-amber-900">
+                            {displayedEnergyKWh} kWh
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-amber-700">Coverage</p>
+                          <p className="text-sm font-semibold text-orange-700">
+                            Partial route only
+                          </p>
+                        </div>
+                      </div>
+                      <p className="mt-3 text-sm text-amber-800">
+                        These suggestions are individually reachable with the current analysis, but
+                        they do not yet form a complete charging plan to the destination.
+                      </p>
                     </div>
                   )}
                 </div>
@@ -1050,11 +1250,14 @@ export default function PlannerPage() {
                 <div className="flex items-center gap-2 text-muted-foreground">
                   <Clock className="h-4 w-4" />
                   <span>
-                    Total Trip Time:{' '}
-                    {formatDuration(
-                      selectedRoute.durationInTrafficMinutes +
-                        result.evAnalysis.recommendation.totalChargingDurationMinutes
-                    )}
+                    {result.evAnalysis.recommendation.canReachDestination
+                      ? `Total Trip Time: ${formatDuration(
+                          selectedRoute.durationInTrafficMinutes +
+                            result.evAnalysis.recommendation.totalChargingDurationMinutes
+                        )}`
+                      : `Travel Time Only: ${formatDuration(
+                          selectedRoute.durationInTrafficMinutes
+                        )}`}
                   </span>
                 </div>
                 <Button asChild>
