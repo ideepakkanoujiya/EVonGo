@@ -19,6 +19,7 @@ import { getFirebaseAuth } from '@/lib/firebase';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Logo } from '../icons/logo';
 import { cn } from '@/lib/utils';
+import { InstallButton } from '@/components/ui/install-button';
 
 const featureNavItems = [
   { href: '/planner', label: 'Planner' },
@@ -63,7 +64,8 @@ export function Header() {
             );
           })}
         </nav>
-        <div className="ml-auto flex items-center justify-end space-x-4">
+        <div className="ml-auto flex items-center justify-end space-x-2 md:space-x-4">
+          <InstallButton />
           {loading ? (
             <Skeleton className="h-8 w-8 rounded-full" />
           ) : user ? (

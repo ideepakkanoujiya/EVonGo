@@ -18,6 +18,12 @@ export const metadata: Metadata = {
   manifest: '/manifest.json',
   icons: {
     icon: '/logo.png',
+    apple: '/icons/icon-192x192.png',
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'EVonGo',
   },
 };
 

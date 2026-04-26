@@ -55,3 +55,10 @@ firebase-debug.log
 firestore-debug.log
 
 /Research-Papers
+
+# PWA files
+**/public/sw.js
+**/public/workbox-*.js
+**/public/worker-*.js
+**/public/fallback-*.js
+**/public/sw.js.map
