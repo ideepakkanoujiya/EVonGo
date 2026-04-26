@@ -3,7 +3,7 @@ import Image from 'next/image';
 export function Logo(props: { className?: string }) {
   return (
     <Image
-      src="https://i.ibb.co/WWWkDvDt/Gemini-Generated-Image-tww1nrtww1nrtww1.png"
+      src="/logo.png"
       alt="EVonGoLogo"
       width={160}
       height={40}

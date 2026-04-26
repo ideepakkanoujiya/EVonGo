@@ -17,7 +17,7 @@ export const metadata: Metadata = {
   description: 'A comprehensive web application for electric vehicle owners, featuring a smart route planner, charging station locator, and community hub.',
   manifest: '/manifest.json',
   icons: {
-    icon: 'https://i.ibb.co/WWWkDvDt/Gemini-Generated-Image-tww1nrtww1nrtww1.png',
+    icon: '/logo.png',
   },
 };
 
