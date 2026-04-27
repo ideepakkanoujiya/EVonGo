@@ -6,12 +6,14 @@ const withPWA = withPWAInit({
   cacheOnFrontEndNav: true,
   aggressiveFrontEndNavCaching: true,
   reloadOnOnline: true,
-  swcMinify: true,
   disable: process.env.NODE_ENV === 'development',
 });
 
 const nextConfig: NextConfig = {
   /* config options here */
+  outputFileTracingIncludes: {
+    '/api/planner/vehicle-options': ['./backend/ml-service/data/**/*.csv'],
+  },
   typescript: {
     ignoreBuildErrors: true,
   },

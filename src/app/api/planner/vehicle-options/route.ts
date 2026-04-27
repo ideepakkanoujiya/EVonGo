@@ -33,13 +33,23 @@ type VehicleAccumulator = {
   sources: Set<string>;
 };
 
-const DATA_DIR = path.join(process.cwd(), 'backend', 'ml-service', 'data');
 const PREFERRED_CSVS = [
   'electric_vehicle_analytics.csv',
   'open-ev-data-v1.24.0.csv',
   'electric_vehicles_spec_2025.csv.csv',
   'electric_vehicles_spec_2025.csv',
 ];
+
+function vehicleDataDirCandidates(): string[] {
+  const candidates = [
+    process.env.VEHICLE_DATA_DIR,
+    path.join(process.cwd(), 'backend', 'ml-service', 'data'),
+    path.join(process.cwd(), '.next', 'standalone', 'backend', 'ml-service', 'data'),
+    path.join(process.cwd(), '..', 'backend', 'ml-service', 'data'),
+  ].filter((value): value is string => Boolean(value && value.trim()));
+
+  return Array.from(new Set(candidates));
+}
 
 function splitCsvLine(line: string): string[] {
   const fields: string[] = [];
@@ -132,8 +142,25 @@ function pickConnector(acc: VehicleAccumulator): string {
   return bestLabel;
 }
 
-async function listCsvDataFiles(): Promise<string[]> {
-  const preferred = PREFERRED_CSVS.map((name) => path.join(DATA_DIR, name));
+async function resolveVehicleDataDir(): Promise<string> {
+  const candidates = vehicleDataDirCandidates();
+
+  for (const candidate of candidates) {
+    try {
+      const stat = await fs.stat(candidate);
+      if (stat.isDirectory()) return candidate;
+    } catch {
+      // Keep trying fallback locations.
+    }
+  }
+
+  throw new Error(
+    `Vehicle data directory not found. Checked: ${candidates.join(', ')}`
+  );
+}
+
+async function listCsvDataFiles(dataDir: string): Promise<string[]> {
+  const preferred = PREFERRED_CSVS.map((name) => path.join(dataDir, name));
   const existingPreferred: string[] = [];
   for (const filePath of preferred) {
     try {
@@ -144,10 +171,10 @@ async function listCsvDataFiles(): Promise<string[]> {
     }
   }
 
-  const allEntries = await fs.readdir(DATA_DIR, { withFileTypes: true });
+  const allEntries = await fs.readdir(dataDir, { withFileTypes: true });
   const extraCsvs = allEntries
     .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.csv'))
-    .map((entry) => path.join(DATA_DIR, entry.name))
+    .map((entry) => path.join(dataDir, entry.name))
     .filter((filePath) => !existingPreferred.includes(filePath))
     .sort((a, b) => path.basename(a).localeCompare(path.basename(b)));
 
@@ -305,10 +332,14 @@ function toVehicleOptions(records: VehicleAccumulator[]): VehicleOption[] {
 
 export async function GET() {
   try {
-    const csvFiles = await listCsvDataFiles();
+    const dataDir = await resolveVehicleDataDir();
+    const csvFiles = await listCsvDataFiles(dataDir);
     if (csvFiles.length === 0) {
       return NextResponse.json(
-        { success: false, error: 'No CSV datasets found in backend/ml-service/data' },
+        {
+          success: false,
+          error: `No CSV datasets found in ${dataDir}`,
+        },
         { status: 500 }
       );
     }
